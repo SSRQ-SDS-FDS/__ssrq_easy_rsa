@@ -1,8 +1,6 @@
 #!/bin/sh -e
 #
-# 2020 Marko Seric (marko.seric at ssrq-sds-fds.ch)
-# 2020,2021,2023 Dennis Camera (dennis.camera at riiengineering.ch)
-# 2020 Beni Ruef (bernhard.ruef at ssrq-sds-fds.ch)
+# 2023 Dennis Camera (dennis.camera at riiengineering.ch)
 #
 # This file is part of cdist.
 #
@@ -20,11 +18,15 @@
 # along with cdist. If not, see <http://www.gnu.org/licenses/>.
 #
 
-quote() {
+shquot() {
 	sed -e "s/'/'\\\\''/g" -e "1s/^/'/" -e "\$s/\$/'/" <<-EOF
 	$*
 	EOF
 }
+
+mkdir "${__object:?}/files"
+trap '${uses_stdin:-false} || :>"${__object:?}/stdin"' EXIT
+
 
 os=$(cat "${__global:?}/explorer/os")
 state_is=$(cat "${__object:?}/explorer/state")
@@ -60,15 +62,15 @@ in
 		;;
 	(no-pki)
 		# NOTE: The following block is a bit of a "hack" to work around the fact
-		#       that requirements in cdist only work for code, but not for
-		#       explorers. Due to this, it could happen that the state explorer
-		#       executes before the PKI has been initialised.
+		#       that requirements in cdist/skonfig only work for code, but not
+		#       for explorers. Due to this, it could happen that the state
+		#       explorer executes before the PKI has been initialised.
 
 		# Before doing anything else, check if the --pki is present.
 		cat <<-EOF
-		test -d $(quote "${pki_dir:?}") || {
+		${__remote_exec:?} $(shquot "${__target_host:?}") $(shquot "test -d $(shquot "${pki_dir:?}")") || {
 			echo 'Could not find a PKI directory structure in ${pki_dir-?}.' >&2
-			echo 'Please make sure that __ssrq_easy_rsa_pki${pki_dir-} is run first.' >&2
+			echo 'Please make sure that __easy_rsa_pki${pki_dir-} is run first.' >&2
 			exit 1
 		}
 		EOF
@@ -78,19 +80,19 @@ in
 		;;
 esac
 
-opt_params=
+build_opt_params=
 # loop through mapping file
 while read -r param option
 do
 	if test -s "${__object:?}/parameter/${param}"
 	then
 		value=$(head -n 1 "${__object:?}/parameter/${param}")
-		opt_params="${opt_params} --${option}=$(quote "${value}")"
+		build_opt_params="${build_opt_params-} --${option}=$(shquot "${value}")"
 	fi
 done <"${__type:?}/files/param_mapping.txt"
 unset -v param option
 
-cmd_opts=''
+build_cmd_opts=''
 
 case ${ca_type}
 in
@@ -107,7 +109,7 @@ in
 		fi
 		;;
 	(sub)
-		cmd_opts="${cmd_opts-} subca"
+		build_cmd_opts="${build_cmd_opts-} subca"
 		;;
 	(*)
 		printf 'Invalid --type: %s\n' "${ca_type}" >&2
@@ -115,68 +117,97 @@ in
 		;;
 esac
 
+# NOTE: easyrsa(1) requires --passin == --passout for the build-ca command
 case $(
 	test -e "${__object:?}/parameter/password" \
 	&& cat "${__object:?}/parameter/password")
 in
 	(stdin|-)
-			opt_params="${opt_params-} --passin=file:\"\${__object:?}/stdin\""
+		build_opt_params="${build_opt_params-} --passin=stdin --passout=stdin"
+
+		# NOTE: since stdin is a stream and easy-rsa requires the password
+		#       twice (to generate a private key and to generate the CSR),
+		#       we need to duplicate the first line of stdin
+		stdin_duplines=1
 		;;
 	('')
 		# no --password or empty --password => nopass
-		cmd_opts="${cmd_opts-} nopass"
+		build_cmd_opts="${build_cmd_opts-} nopass"
 		;;
 	(*)
-		opt_params="${opt_params-} --passout=file:\"\${__object:?}/parameter/password\""
+		build_opt_params="${build_opt_params-} --passin=file:/dev/null --passout=file:\"\${__object:?}/parameter/password\""
 		;;
 esac
 
-
-printf '%s --pki-dir=%s --vars=%s --batch --req-cn=%s%s build-ca%s\n' \
+# build CA command
+printf >>"${__object:?}/files/code-remote" '%s --pki-dir=%s --vars=%s --batch --req-cn=%s%s build-ca%s\n' \
 	"${easyrsa_bin}" \
-	"$(quote "${pki_dir}")" \
-	"$(quote "${pki_dir}/vars")" \
-	"$(quote "${common_name}")" \
-	"${opt_params:+ ${opt_params# }}" \
-	"${cmd_opts:+ ${cmd_opts# }}"
+	"$(shquot "${pki_dir}")" \
+	"$(shquot "${pki_dir}/vars")" \
+	"$(shquot "${common_name}")" \
+	"${build_opt_params:+ ${build_opt_params# }}" \
+	"${build_cmd_opts:+ ${build_cmd_opts# }}"
 
 if test "${ca_type}" = 'sub' -a -f "${__object:?}/parameter/auto-sign-with"
 then
 	parent_pki=$(cat "${__object:?}/parameter/auto-sign-with")
-	easyrsa_parent="${easyrsa_bin:?} --pki-dir=$(quote "${parent_pki:?}") --vars=$(quote "${parent_pki:?}/vars") --batch"
+	easyrsa_parent="${easyrsa_bin:?} --pki-dir=$(shquot "${parent_pki:?}") --vars=$(shquot "${parent_pki:?}/vars") --batch"
 
-
+	sign_opt_params=
 	case $(
 		test -e "${__object:?}/parameter/parent-password" \
 		&& cat "${__object:?}/parameter/parent-password")
 	in
 		(stdin|-)
-			opt_params="${opt_params-} --passin=file:\"\${__object:?}/stdin\""
+			sign_opt_params="${sign_opt_params-} --passin=stdin --passout=file:/dev/null"
 			;;
 		('')
 			# nothing to do
 			;;
 		(*)
-			opt_params="${opt_params-} --passin=file:\"\${__object:?}/parameter/parent-password\""
+			sign_opt_params="${sign_opt_params-} --passin=file:\"\${__object:?}/parameter/parent-password\" --passout=file:/dev/null"
 			;;
 	esac
 
 	ca_default_expire=3650
-	cat <<-EOF
+
 
 	# Sign sub CA
-	days=\$(
-		set_var() { export "\$1=\$2"; }
-		EASYRSA_CALLER=1 . $(quote "${pki_dir:?}/vars")
-		echo "\${EASYRSA_CA_EXPIRE:-$((ca_default_expire))}"
-	)
+	cat >>"${__object:?}/files/code-remote" <<EOF
 
-	set -e
+days=\$(
+	set_var() { export \"\$1=\$2\"; }
+	EASYRSA_CALLER=1 . $(shquot "${pki_dir:?}/vars")
+	echo \"\${EASYRSA_CA_EXPIRE:-$((ca_default_expire))}\"
+)
 
-	${easyrsa_parent} import-req $(quote "${pki_dir:?}/reqs/ca.req") $(quote "${__object_id:?}") \\
-	&& ${easyrsa_parent} --days=\$((days)) sign-req ca $(quote "${__object_id:?}")
+set -e
+${easyrsa_parent} import-req $(shquot "${pki_dir:?}/reqs/ca.req") $(shquot "${__object_id:?}") \\
+&& ${easyrsa_parent} --days=\$((days))${sign_opt_params-} sign-req ca $(shquot "${__object_id:?}")
 
-	cat $(quote "${parent_pki:?}/issued/${__object_id:?}.crt") >$(quote "${pki_dir:?}/ca.crt")
-	cat $(quote "${parent_pki:?}/ca.crt") $(quote "${pki_dir:?}/ca.crt") >$(quote "${pki_dir:?}/chain.pem")
-	EOF
+cat $(shquot "${parent_pki:?}/issued/${__object_id:?}.crt") >$(shquot "${pki_dir:?}/ca.crt")
+cat $(shquot "${parent_pki:?}/ca.crt") $(shquot "${pki_dir:?}/ca.crt") >$(shquot "${pki_dir:?}/chain.pem")
+EOF
+fi
+
+if test -s "${__object:?}/files/code-remote"
+then
+	if test -f "${__object:?}/stdin"
+	then
+		remote_stdin="${__object:?}/stdin"
+		uses_stdin=true
+
+		stdin_cmd=$(
+			sed -e '1s/^$/-e ""/' -e '1s/^/sed /' -e 's/[0-9][0-9]*/-e &p/g' <<-EOF
+			${stdin_duplines-}
+			EOF
+		)
+	fi
+
+	printf '%s %s | %s %s %s\n' \
+		"${stdin_cmd:-cat}" \
+		"${remote_stdin:-/dev/null}" \
+		"${__remote_exec:?}" \
+		"$(shquot "${__target_host:?}")" \
+		"$(shquot "$(cat "${__object:?}/files/code-remote")")"
 fi

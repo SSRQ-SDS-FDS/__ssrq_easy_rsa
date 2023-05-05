@@ -49,6 +49,29 @@ digest
     ``sha384``, ``sha512``
 key-size
     value for ``EASYRSA_KEY_SIZE`` (keysize in bits to generate)
+password
+    password to use to secure the generated CA's private key.
+
+    If the special value ``stdin`` is used, the password will be read from the
+    object's standard input. The password will then only be copied to the target
+    if it is needed and be deleted as soon as it is not required anymore.
+    Note that only one of the parameters ``--password`` and
+    ``--parent-password`` can use ``stdin``.
+
+    Defaults to: *no password*
+parent-password
+    password to decrypt the parent CA's private key.
+    This parameter is used for sub CAs only and is required for
+    ``--auto-sign-with`` if the parent CA's private key is protected using a
+    password.
+
+    If the special value ``stdin`` is used, the password will be read from the
+    object's standard input. The password will then only be copied to the target
+    if it is needed and be deleted as soon as it is not required anymore.
+    Note that only one of the parameters ``--password`` and
+    ``--parent-password`` can use ``stdin``.
+
+    Defaults to: *no password*
 type
     The type of CA to create.
 
