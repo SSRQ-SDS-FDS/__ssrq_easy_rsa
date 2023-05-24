@@ -19,20 +19,4 @@
 # along with cdist. If not, see <http://www.gnu.org/licenses/>.
 #
 
-os=$(cat "${__global:?}/explorer/os")
-
-case ${os}
-in
-	(devuan|debian)
-		__package easy-rsa --state present
-		;;
-	(openwrt)
-		__package_opkg openvpn-easy-rsa --state present
-		;;
-	(*)
-		: "${__type:?}"  # make shellcheck happy
-		printf "Your operating system (%s) is currently not supported by this type (%s)\n" "${os}" "${__type##*/}" >&2
-		printf "Please contribute an implementation for it if you can.\n" >&2
-		exit 1
-		;;
-esac
+. "${__type:?}/files/packages.manifest"

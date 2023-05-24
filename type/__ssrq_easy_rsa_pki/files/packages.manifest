@@ -1,0 +1,28 @@
+os=$(cat "${__global:?}/explorer/os")
+
+# ensure that easy-rsa is installed
+case ${os}
+in
+	(alpine)
+		# NOTE: requires community repository
+		__package easy-rsa
+		;;
+	(archlinux|debian|devuan|ubuntu|freebsd|netbsd|openbsd|centos|fedora|redhat|suse)
+		__package easy-rsa
+		;;
+	(gentoo)
+		__package app-crypt/easy-rsa
+		;;
+	(openwrt)
+		__package openvpn-easy-rsa
+		;;
+	(void)
+		__package easyrsa
+		;;
+	(*)
+		: "${__type:?}"  # make shellcheck happy
+		printf "Your operating system (%s) is currently not supported by this type (%s)\n" "${os}" "${__type##*/}" >&2
+		printf "Please contribute an implementation for it if you can.\n" >&2
+		exit 1
+		;;
+esac

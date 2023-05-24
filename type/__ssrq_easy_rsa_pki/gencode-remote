@@ -28,8 +28,6 @@ drop_awk_comments() { quote "$(sed '/^[[:blank:]]*#.*$/d;/^$/d' "$@")"; }
 quote_nonnum() { sed 's/^.*[^0-9].*$/"&"/;q' "$@"; }
 
 
-os=$(cat "${__global:?}/explorer/os")
-
 read -r state_is state_extra <"${__object:?}/explorer/state"
 
 pki_dir="/${__object_id:?}"
@@ -42,21 +40,7 @@ then
 	exit 1
 fi
 
-
-case ${os}
-in
-	(debian|devuan)
-		easyrsa_bin='/usr/share/easy-rsa/easyrsa'
-		vars_example='/usr/share/easy-rsa/vars.example'
-		;;
-	(openwrt)
-		easyrsa_bin='easyrsa'
-		vars_example='/etc/easy-rsa/vars'
-		;;
-	(*)
-		exit 1  # fail, OS whitelist should be in manifest
-		;;
-esac
+. "${__type:?}/files/locations.sh"
 
 
 ###############################################################################
